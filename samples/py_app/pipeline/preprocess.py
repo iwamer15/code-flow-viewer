@@ -16,11 +16,10 @@ class Augmenter:
     def apply(self, rows):
         out = []
         for r in rows:
-            match self.rng % 3:
-                case 0:
-                    out.append(self.flip(r))
-                case _:
-                    out.append(r)
+            if self.rng % 3 == 0:
+                out.append(self.flip(r))
+            else:
+                out.append(r)
         return out
 
     def flip(self, r):
