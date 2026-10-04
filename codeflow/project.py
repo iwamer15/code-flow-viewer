@@ -399,7 +399,9 @@ def build_graph(root: str, results: dict[str, dict], all_rels: set) -> dict:
                     s = file_symbol(files, name, allow_method=True)
                     if s:
                         return [ctor_of(s) if s["kind"] == "class" else s], 0
-                return [], 0
+                if kind == "module":
+                    return [], 0
+                # import したクラスに無いメソッド (継承など) は、下の推測に任せる
             # Klass.static() / Klass::method() / Ruby の Klass.new
             if recv in classes_by_name:
                 for c in classes_by_name[recv]:

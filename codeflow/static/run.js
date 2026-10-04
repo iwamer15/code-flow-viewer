@@ -246,11 +246,14 @@ function applyRunState() {
         if (sid) {
           if (ran.has(sid)) n.addClass('ran');
           else if (R.done && R.traced && counted() && n.data('kind') !== 'class') n.addClass('notrun');
-        } else if (n.data('file') && S.view === 'modules') {
-          const f = S.files.get(n.data('file'));
-          if ((f?.sym || []).some((id) => ran.has(id))) n.addClass('ran');
-          else if (R.done && R.traced && counted() && f?.lang === 'python') n.addClass('notrun');
-          if (R.stackIds.some((id) => S.sym[id]?.f === f?.p)) n.addClass('active');
+        } else if (S.view === 'modules' && (n.data('file') || n.data('dir'))) {
+          // ファイル / フォルダ単位: 中の関数が1つでも実行されたら実行済み
+          const pre = n.data('dir') ? n.data('dir') + '/' : null;
+          const inNode = (p) => (pre ? p.startsWith(pre) : p === n.data('file'));
+          const fs = pre ? S.data.files.filter((f) => f.lang && inNode(f.p)) : [S.files.get(n.data('file'))].filter(Boolean);
+          if (fs.some((f) => (f.sym || []).some((id) => ran.has(id)))) n.addClass('ran');
+          else if (R.done && R.traced && counted() && fs.some((f) => f.lang === 'python')) n.addClass('notrun');
+          if (R.stackIds.some((id) => inNode(S.sym[id]?.f || ''))) n.addClass('active');
         }
       });
       const chain = R.stackIds;
@@ -305,11 +308,11 @@ function renderHot() {
   const rows = [...R.ran.entries()].sort((a, b) => b[1].incl - a[1].incl || b[1].calls - a[1].calls).slice(0, 60);
   const max = Math.max(1, ...rows.map(([, r]) => r.incl));
   const note = counted() ? '' : `<tr><td colspan="4" class="muted">軽量モード (Python ${esc(R.snap.py || '')}): 回数は数えず、10ms ごとのサンプリングで時間と実行位置を測っています。⚙ で回数も数えられます (遅くなります)</td></tr>`;
-  $('#hotTable').innerHTML = note + '<tr><th>関数</th><th>回数</th><th>累計</th><th>自身</th></tr>' + rows.map(([sid, r]) => {
+  $('#hotTable').innerHTML = note + '<tr><th>関数</th><th>回数</th><th>累計</th><th class="self">自身</th></tr>' + rows.map(([sid, r]) => {
     const s = S.sym[sid];
     return `<tr data-sym="${esc(sid)}" class="${R.stackIds.includes(sid) ? 'live' : ''}" title="${esc(s.f)}:${s.s}">`
       + `<td>${esc(symLabel(s))} <span class="muted">${esc(base(s.f))}</span></td><td>${r.calls || '-'}</td>`
-      + `<td><span class="bar" style="width:${Math.round(40 * r.incl / max)}px"></span>${fmtMs(r.incl)}</td><td>${fmtMs(r.self)}</td></tr>`;
+      + `<td><span class="bar" style="width:${Math.round(40 * r.incl / max)}px"></span>${fmtMs(r.incl)}</td><td class="self">${fmtMs(r.self)}</td></tr>`;
   }).join('');
   const st = R.snap.stack || [];
   $('#runStack').innerHTML = R.running && st.length

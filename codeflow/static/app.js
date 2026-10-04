@@ -37,6 +37,7 @@ const S = {
   view: 'flow', entry: null, depth: 4, dir: 'TB', showExt: false, expanded: new Set(),
   selected: null, chartSym: null, chartStack: [], scope: '',
   tabs: [], active: null, models: new Map(), stamp: null, scanning: false, collapsed: new Set(),
+  modExpanded: null,
 };
 let cy = null, editor = null, monacoReady = null, mermaidId = 0;
 
@@ -93,6 +94,7 @@ async function scan(root, { keepView = false } = {}) {
     const d = await api('/api/scan', { body: root ? { root } : {} });
     ingest(d);
     if (!keepView || !S.sym[S.entry]) S.entry = S.data.entries[0]?.id || null;
+    if (!keepView && window.restoreViewState) restoreViewState();
     fillEntries();
     renderFileTree();
     render();
@@ -111,6 +113,18 @@ async function scan(root, { keepView = false } = {}) {
 }
 
 function ingest(d) {
+  if (!S.data || S.data.root !== d.root) {
+    // 別のフォルダに切り替えたら、前のフォルダのタブは閉じる (同じ相対パスで別フォルダに保存しないように)
+    S.modExpanded = null;
+    S.tabs.forEach((t) => t.model.dispose());
+    S.tabs = []; S.active = null;
+    if (editor) editor.setModel(null);
+    $('#editorEmpty').classList.remove('hidden');
+    renderTabs();
+    S.chartSym = null; S.chartStack = []; S.selected = null; S.expanded = new Set(); S.collapsed = new Set();
+    hideDetails();
+    $('#stLeft').textContent = '';
+  }
   S.data = d; S.sym = d.symbols; S.files = new Map(d.files.map((f) => [f.p, f]));
   $('#rootInput').value = d.root;
   S.out = new Map(); S.inc = new Map();
@@ -218,10 +232,18 @@ function initCy() {
   });
   cy.on('tap', 'node', (ev) => {
     const n = ev.target;
+    if (n.data('dir')) { S.modExpanded.add(n.data('dir')); render(); return; }
     if (n.data('file') && !n.data('sid')) { openFile(n.data('file')); showFileDetails(n.data('file')); return; }
     if (n.data('sid')) selectSym(n.data('sid'), { reveal: true });
   });
   cy.on('dbltap', 'node', (ev) => {
+    const fpath = ev.target.data('file');
+    if (S.view === 'modules' && fpath && fpath.includes('/')) {
+      // ファイルをダブルクリック → 親フォルダ(とその下)をたたむ
+      const dir = fpath.slice(0, fpath.lastIndexOf('/'));
+      for (const d of [...S.modExpanded]) if (d === dir || d.startsWith(dir + '/')) S.modExpanded.delete(d);
+      render(); return;
+    }
     const sid = ev.target.data('sid'); if (!sid) return;
     if (S.view === 'flow') {
       S.expanded.has(sid) ? S.expanded.delete(sid) : S.expanded.add(sid);
@@ -255,6 +277,7 @@ function cyStyle() {
     { selector: 'node.more', style: { 'border-style': 'dashed', 'border-width': 2 } },
     { selector: 'node.ext', style: { shape: 'round-rectangle', 'background-color': 'transparent', 'border-style': 'dotted', 'border-color': edge, color: cssVar('--muted'), 'font-size': 10, padding: '4px' } },
     { selector: 'node.file', style: { shape: 'round-rectangle', 'border-width': 2 } },
+    { selector: 'node.dirnode', style: { shape: 'barrel', 'border-width': 2.5, 'border-style': 'double', 'font-weight': 'bold' } },
     // 実行状態 (▶ 実行 で付く)
     { selector: 'node.notrun', style: { opacity: 0.35 } },
     { selector: 'node.ran', style: { 'border-color': cssVar('--ok'), 'border-width': 3, opacity: 1 } },
@@ -362,27 +385,79 @@ function buildAll() {
   return { els, info: `${ids.size} 関数${capped ? ' (1200件で打ち切り。パスで絞り込んでください)' : ''}` };
 }
 
-function buildModules() {
-  const els = [], ids = new Set();
-  const files = S.data.files.filter((f) => f.lang);
-  const linked = new Set();
-  for (const f of files) for (const t of f.imp || []) { if (inScope(f.p) || inScope(t)) { linked.add(f.p); linked.add(t); } }
-  for (const f of files) {
-    if (!linked.has(f.p) && !(S.scope && inScope(f.p))) continue;
-    if (ids.size >= 900) break;
-    ids.add(f.p);
-    const color = LANG_COLOR[f.lang] || '#888';
-    const dir = f.p.includes('/') ? f.p.slice(0, f.p.lastIndexOf('/')) + '/' : './';
-    els.push({ group: 'nodes', data: { id: 'f:' + f.p, file: f.p, label: `${base(f.p)}\n${dir}`, bg: fileColors(f.p).bg, bd: color }, classes: 'file' + (inScope(f.p) ? '' : ' faded') });
+// モジュール依存: フォルダ単位でまとめ、クリックしたフォルダだけ中のファイルに展開する
+function modGroup(path) {
+  if (S.scope && inScope(path)) return 'f:' + path;
+  const parts = path.split('/');
+  let acc = '';
+  for (let i = 0; i < parts.length - 1; i++) {
+    acc = acc ? `${acc}/${parts[i]}` : parts[i];
+    if (!S.modExpanded.has(acc)) return 'd:' + acc;
   }
+  return 'f:' + path;
+}
+function allDirs(files) {
+  const dirs = new Set();
+  for (const f of files) { const parts = f.p.split('/'); let acc = ''; for (let i = 0; i < parts.length - 1; i++) { acc = acc ? `${acc}/${parts[i]}` : parts[i]; dirs.add(acc); } }
+  return dirs;
+}
+function buildModules() {
+  const els = [], nodes = new Map();
+  const files = S.data.files.filter((f) => f.lang);
+  if (S.modExpanded === null) {
+    // 初回: 60ファイル以下なら全部ひらく、それより多ければ最上位フォルダでまとめる
+    S.modExpanded = files.length <= 60 ? allDirs(files) : new Set();
+  }
+  const linked = new Set();
+  for (const f of files) for (const t of f.imp || []) { linked.add(f.p); linked.add(t); }
   for (const f of files) {
-    if (!ids.has(f.p)) continue;
-    for (const t of f.imp || []) {
-      if (!ids.has(t)) continue;
-      els.push({ group: 'edges', data: { id: `${f.p}=>${t}`, source: 'f:' + f.p, target: 'f:' + t, label: '' }, classes: 'taxi' });
+    if (S.scope && !inScope(f.p) && ![...(f.imp || [])].some(inScope)) continue;
+    const g = modGroup(f.p);
+    if (g.startsWith('f:') && !linked.has(f.p) && !(S.scope && inScope(f.p))) {
+      // 展開したフォルダ直下のファイルは、import 関係が無くても表示する
+      const dir = f.p.includes('/') ? f.p.slice(0, f.p.lastIndexOf('/')) : '';
+      if (!dir || !S.modExpanded.has(dir)) continue;
+    }
+    if (!nodes.has(g)) nodes.set(g, { files: [], langs: new Map() });
+    const n = nodes.get(g);
+    n.files.push(f);
+    n.langs.set(f.lang, (n.langs.get(f.lang) || 0) + 1);
+    if (nodes.size >= 900) break;
+  }
+  for (const [id, n] of nodes) {
+    const topLang = [...n.langs.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const color = LANG_COLOR[topLang] || '#888';
+    if (id.startsWith('d:')) {
+      const dir = id.slice(2);
+      els.push({ group: 'nodes', data: { id, dir, label: `📁 ${dir}/\n${n.files.length} ファイル (クリックで展開)`, bg: fileColors(dir).bg, bd: color }, classes: 'dirnode' });
+    } else {
+      const f = n.files[0];
+      const dir = f.p.includes('/') ? f.p.slice(0, f.p.lastIndexOf('/')) + '/' : './';
+      els.push({ group: 'nodes', data: { id, file: f.p, label: `${base(f.p)}\n${dir}`, bg: fileColors(f.p).bg, bd: color }, classes: 'file' + (inScope(f.p) ? '' : ' faded') });
     }
   }
-  return { els, info: `${ids.size} ファイル (矢印: import する側 → される側)` };
+  const agg = new Map();
+  for (const f of files) {
+    const a = modGroup(f.p);
+    if (!nodes.has(a)) continue;
+    for (const t of f.imp || []) {
+      const b = modGroup(t);
+      if (a === b || !nodes.has(b)) continue;
+      const k = `${a}=>${b}`;
+      agg.set(k, (agg.get(k) || 0) + 1);
+    }
+  }
+  for (const [k, c] of agg) {
+    const [a, b] = k.split('=>');
+    els.push({ group: 'edges', data: { id: k, source: a, target: b, label: c > 1 ? String(c) : '' }, classes: 'taxi' });
+  }
+  const nd = [...nodes.keys()].filter((k) => k.startsWith('d:')).length;
+  return { els, info: `${nodes.size - nd} ファイル + ${nd} フォルダ (フォルダをクリックで展開 / ファイルをダブルクリックでたたむ。矢印: import する側 → される側)` };
+}
+function modExpandAll(open) {
+  const files = S.data.files.filter((f) => f.lang);
+  S.modExpanded = open ? allDirs(files) : new Set();
+  render();
 }
 
 function render() {
@@ -399,7 +474,9 @@ function render() {
   cy.elements().remove();
   cy.add(els);
   cy.endBatch();
-  const rankDir = S.view === 'modules' ? (S.dir === 'TB' ? 'LR' : 'TB') : S.dir;
+  // モジュール依存は少ないときは左→右 (パイプライン風)。多いと import の連鎖が深く極端に横長になるので上→下
+  const rankDir = S.view === 'modules' && cy.nodes().length <= 60 ? (S.dir === 'TB' ? 'LR' : 'TB') : S.dir;
+  S.rankDir = rankDir;
   cy.edges('.taxi').style('taxi-direction', rankDir === 'TB' ? 'downward' : 'rightward');
   if (cy.nodes().length > 250 || cy.edges().length > 350) fastLayered(rankDir);   // 大きいグラフは dagre だと数十秒かかる
   else cy.layout({ name: 'dagre', rankDir, nodeSep: 24, rankSep: S.view === 'all' ? 50 : 60, edgeSep: 8, animate: false, fit: true, padding: 30 }).run();
@@ -571,7 +648,7 @@ function showDetails(sid) {
   const outs = S.out.get(sid) || [], ins = S.inc.get(sid) || [];
   const link = (id, prefix = '') => { const t = S.sym[id]; return `<span class="lnk" data-sym="${esc(id)}" title="${esc(t.f)}:${t.s}">${prefix}${esc(symLabel(t))} <span class="muted">${esc(base(t.f))}:${t.s}</span></span>`; };
   const card = $('#details');
-  card.innerHTML = `<button class="x ghost" data-act="close">✕</button>
+  card.innerHTML = `<button class="x ghost" data-act="close">✕</button><button class="mini ghost" data-act="min" title="たたむ / ひらく">–</button>
     <h3>${esc(symLabel(s))}</h3>
     <div class="loc">${esc(s.f)} : ${s.s}–${s.e}行 · ${({ function: '関数', method: 'メソッド', class: 'クラス', toplevel: 'トップレベル処理' })[s.k] || s.k}</div>
     ${window.runInfo ? runInfo(sid) : ''}
@@ -609,6 +686,7 @@ $('#details').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-act]'); if (!b) return;
   const sid = $('#details').dataset.sid;
   if (b.dataset.act === 'close') hideDetails();
+  if (b.dataset.act === 'min') { $('#details').classList.toggle('min'); return; }
   if (b.dataset.act === 'chart') openChart(sid);
   if (b.dataset.act === 'entry') setEntry(sid);
   if (b.dataset.act === 'open') { const s = S.sym[sid]; openFile(s.f, s.s, s.e); }
@@ -634,7 +712,9 @@ function openChart(sid, { push = true } = {}) {
 function mmText(t, n = 70) {
   t = String(t ?? '').replace(/\s+/g, ' ').trim();
   if (t.length > n) t = t.slice(0, n - 1) + '…';
-  return t.replace(/[^\p{L}\p{N} _.,:=+\-*/%!?@$^~'`]/gu, (c) => `#${c.codePointAt(0)};`);
+  // Mermaid の記号は文字参照に。_ * ` は Markdown (太字など) として解釈されるのでバックスラッシュで打ち消す
+  // (ラベルに <br/> 等があると、文字参照を戻した後に Markdown 処理されるため文字参照では防げない)
+  return t.replace(/[^\p{L}\p{N} .,:=+\-/%!?@$^~'_*`]/gu, (c) => `#${c.codePointAt(0)};`).replace(/[_*`]/g, (c) => '\\' + c);
 }
 
 function buildMermaid(items, title, calleeByName) {
@@ -768,6 +848,7 @@ async function renderChart() {
     const calleeByName = {};
     for (const e of S.out.get(sid) || []) { const t = S.sym[e.to]; if (t && !calleeByName[t.n]) calleeByName[t.n] = e.to; }
     const { code, meta } = buildMermaid(flow.items, symLabel(s), calleeByName);
+    S.chartCode = code;
     mermaid.initialize({ startOnLoad: false, theme: isDark() ? 'dark' : 'default', securityLevel: 'strict', flowchart: { htmlLabels: true, curve: 'basis', useMaxWidth: false }, maxTextSize: 400000, maxEdges: 2000 });
     const { svg } = await mermaid.render('cfm' + (mermaidId++), code);
     inner.innerHTML = svg;
@@ -852,18 +933,43 @@ function initMonaco() {
     editor.onDidChangeCursorPosition(debounce(onCursor, 120));
     // 定義へジャンプ (Ctrl/⌘+クリック, F12)
     const provider = {
-      provideDefinition(model, pos) {
+      async provideDefinition(model, pos) {
         const w = model.getWordAtPosition(pos); if (!w) return null;
         const path = model.uri.path.replace(/^\//, '');
-        const cands = Object.entries(S.sym).filter(([, s]) => s.n === w.word && s.k !== 'toplevel');
-        if (!cands.length) return null;
-        const pick = cands.find(([, s]) => s.f === path) || cands[0];
-        const s = pick[1];
-        if (s.f === path) return { uri: model.uri, range: new monaco.Range(s.s, 1, s.s, 1) };
-        openFile(s.f, s.s, s.e);
-        return null;
+        const ids = definitionCandidates(path, pos.lineNumber, w.word);
+        if (!ids.length) return null;
+        if (ids.length === 1) {
+          const s = S.sym[ids[0]];
+          if (s.f === path) return { uri: model.uri, range: new monaco.Range(s.s, 1, s.s, 1) };
+          openFile(s.f, s.s, s.e);
+          return null;
+        }
+        // 候補が複数 → VS Code と同じく一覧 (ピーク) で選ぶ
+        const locs = [];
+        for (const id of ids.slice(0, 12)) {
+          const s = S.sym[id];
+          const uri = monaco.Uri.file('/' + s.f);
+          if (!monaco.editor.getModel(uri)) {
+            const d = await api(`/api/file?path=${encodeURIComponent(s.f)}`).catch(() => null);
+            if (!d) continue;
+            monaco.editor.createModel(d.content, d.lang, uri);
+          }
+          locs.push({ uri, range: new monaco.Range(s.s, 1, s.e, 1) });
+        }
+        return locs;
       },
     };
+    // ピークの一覧から別ファイルを開くとき、このツールのタブで開く
+    if (monaco.editor.registerEditorOpener) {
+      monaco.editor.registerEditorOpener({
+        openCodeEditor(_src, resource, sel) {
+          const p = resource.path.replace(/^\//, '');
+          if (!S.files.has(p)) return false;
+          openFile(p, sel?.startLineNumber || sel?.lineNumber || null, null, true);
+          return true;
+        },
+      });
+    }
     const hover = {
       provideHover(model, pos) {
         const w = model.getWordAtPosition(pos); if (!w) return null;
@@ -881,6 +987,30 @@ function initMonaco() {
   return monacoReady;
 }
 
+// 定義ジャンプの候補: まず解析済みの呼び出し関係 (import・型推定込みで解決済み) から、
+// 無ければ同名の定義を「同じファイル > import 先 > 同じフォルダ > その他」の順で
+function symAt(path, line) {
+  let best = null;
+  for (const id of S.files.get(path)?.sym || []) {
+    const s = S.sym[id];
+    if (s && s.k !== 'class' && s.s <= line && line <= s.e && (!best || s.s >= S.sym[best].s)) best = id;
+  }
+  if (!best) best = (S.files.get(path)?.sym || []).find((id) => S.sym[id]?.k === 'toplevel') || null;
+  return best;
+}
+function definitionCandidates(path, line, word) {
+  const encl = symAt(path, line);
+  const viaGraph = encl ? [...new Set((S.out.get(encl) || []).map((e) => e.to).filter((id) => S.sym[id]?.n === word))] : [];
+  if (viaGraph.length) return viaGraph;
+  const cands = Object.keys(S.sym).filter((id) => S.sym[id].n === word && S.sym[id].k !== 'toplevel');
+  if (cands.length <= 1) return cands;
+  const imp = new Set(S.files.get(path)?.imp || []);
+  const dirOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+  const rank = (id) => { const f = S.sym[id].f; return f === path ? 0 : imp.has(f) ? 1 : dirOf(f) === dirOf(path) ? 2 : 3; };
+  const best = Math.min(...cands.map(rank));
+  return cands.filter((id) => rank(id) === best);
+}
+
 const decos = new Map();
 async function openFile(path, line = null, endLine = null, onlyLine = false) {
   if (!path) return;
@@ -892,7 +1022,9 @@ async function openFile(path, line = null, endLine = null, onlyLine = false) {
     try { d = await api(`/api/file?path=${encodeURIComponent(path)}`); }
     catch (e) { toast(`${path}: ${e.message}`, true); return; }
     const uri = monaco.Uri.file('/' + path);
-    const model = monaco.editor.getModel(uri) || monaco.editor.createModel(d.content, d.lang, uri);
+    let model = monaco.editor.getModel(uri);
+    if (model && model.getValue() !== d.content) model.setValue(d.content);   // ピーク用に先に作ったモデルを最新に
+    if (!model) model = monaco.editor.createModel(d.content, d.lang, uri);
     tab = { path, model, encoding: d.encoding, mtime: d.mtime, saved: model.getAlternativeVersionId(), view: null };
     model.onDidChangeContent(() => renderTabs());
     S.tabs.push(tab);
@@ -1049,11 +1181,8 @@ function onCursor() {
   if (!t || !editor.getPosition()) return;
   const line = editor.getPosition().lineNumber;
   const f = S.files.get(t.path);
-  let best = null;
-  for (const id of f?.sym || []) {
-    const s = S.sym[id];
-    if (s && s.k !== 'class' && s.k !== 'toplevel' && s.s <= line && line <= s.e && (!best || s.s >= S.sym[best].s)) best = id;
-  }
+  let best = symAt(t.path, line);
+  if (best && S.sym[best].k === 'toplevel') best = null;
   $('#stLeft').textContent = `${t.path} : ${line}行` + (best ? ` — ${S.sym[best].q}` : '');
   if (best && cy && S.view !== 'chart' && cy.getElementById(best).length) {
     cy.elements().removeClass('hl'); cy.getElementById(best).addClass('hl');
@@ -1074,13 +1203,9 @@ $('#depthInp').addEventListener('change', (ev) => { S.depth = Math.max(1, Math.m
 $('#scopeInp').addEventListener('input', debounce((ev) => { S.scope = ev.target.value.trim(); render(); }, 300));
 $('#dirBtn').addEventListener('click', () => { S.dir = S.dir === 'TB' ? 'LR' : 'TB'; $('#dirBtn').textContent = S.dir === 'TB' ? '↓ 縦' : '→ 横'; render(); });
 $('#extChk').addEventListener('change', (ev) => { S.showExt = ev.target.checked; render(); });
+$('#modOpen').addEventListener('click', () => modExpandAll(true));
+$('#modClose').addEventListener('click', () => modExpandAll(false));
 $('#fitBtn').addEventListener('click', () => cy && cy.fit(undefined, 30));
-$('#pngBtn').addEventListener('click', () => {
-  if (!cy) return;
-  const a = document.createElement('a');
-  a.href = cy.png({ full: true, scale: 2, bg: cssVar('--bg') });
-  a.download = `codeflow-${S.view}.png`; a.click();
-});
 $('#searchInp').addEventListener('change', (ev) => {
   const v = ev.target.value; if (!v) return;
   const m = /^(.*) — (.*):(\d+)$/.exec(v);
@@ -1096,7 +1221,12 @@ $$('.tabs button').forEach((b) => b.addEventListener('click', () => {
   $$('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
   $$('#side [data-for]').forEach((el) => el.classList.toggle('hidden', el.dataset.for !== b.dataset.side));
 }));
-$('#loadBtn').addEventListener('click', () => { S.tabs.forEach((t) => t.model.dispose()); S.tabs = []; S.active = null; if (editor) editor.setModel(null); renderTabs(); scan($('#rootInput').value.trim()); });
+$('#loadBtn').addEventListener('click', () => {
+  const dirty = S.tabs.filter(isDirty);
+  const next = $('#rootInput').value.trim();
+  if (dirty.length && next !== S.data?.root && !confirm(`未保存のファイルがあります (${dirty.map((t) => base(t.path)).join(', ')})。破棄して別のフォルダを読み込みますか？`)) return;
+  scan(next);
+});
 $('#rootInput').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('#loadBtn').click(); });
 $('#themeBtn').addEventListener('click', () => {
   document.documentElement.dataset.theme = isDark() ? 'light' : 'dark';

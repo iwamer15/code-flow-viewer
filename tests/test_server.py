@@ -76,6 +76,45 @@ class ServerTest(unittest.TestCase):
         st, r2 = self.req("/api/file", {"path": "pipeline/model.py", "content": "mine2\n", "base_mtime": r["mtime"]})
         self.assertEqual(st, 200)
 
+    def test_search_replace_rename_delete(self):
+        st, r = self.req("/api/search", {"q": "DEF LOAD_DATASET", "include": "*.py"})
+        self.assertEqual(st, 200, r)
+        hits = {f["p"]: f["m"] for f in r["files"]}
+        self.assertIn("pipeline/loader.py", hits)
+        m = hits["pipeline/loader.py"][0]
+        self.assertEqual(m["t"][m["s"]:m["s"] + m["n"]], "def load_dataset")
+        st, r = self.req("/api/search", {"q": "load_dataset", "include": "pipeline/, !*.csv"})
+        self.assertEqual({f["p"] for f in r["files"]}, {"pipeline/loader.py"})
+        st, r = self.req("/api/search", {"q": "trainer", "case": True, "word": True})
+        self.assertTrue(all(f["p"] == "main.py" for f in r["files"]))
+        st, r = self.req("/api/search", {"q": "(", "regex": True})
+        self.assertEqual(st, 400)
+        # 置換 (正規表現の $1 形式) → バックアップされる
+        st, r = self.req("/api/replace", {"q": r"def (_init_rng)", "rep": "def $1_v2", "regex": True,
+                                          "files": ["pipeline/preprocess.py"]})
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["total"], 1)
+        with open(os.path.join(self.proj, "pipeline", "preprocess.py"), encoding="utf-8") as f:
+            self.assertIn("def _init_rng_v2", f.read())
+        st, b = self.req("/api/backups?path=pipeline/preprocess.py")
+        self.assertEqual(len(b["items"]), 1)
+        # 名前変更 → 削除(ゴミ箱へ)
+        with open(os.path.join(self.proj, "tmp_a.py"), "w", encoding="utf-8") as f:
+            f.write("x = 1\n")
+        st, r = self.req("/api/rename", {"path": "tmp_a.py", "to": "sub/tmp_b.py"})
+        self.assertEqual(st, 200, r)
+        self.assertTrue(os.path.isfile(os.path.join(self.proj, "sub", "tmp_b.py")))
+        st, r = self.req("/api/rename", {"path": "sub/tmp_b.py", "to": "main.py"})
+        self.assertEqual(st, 400)                                   # 既存ファイルは上書きしない
+        from codeflow import fileops
+        fileops.TRASH = os.path.join(self.tmp, "trash")
+        st, r = self.req("/api/delete", {"path": "sub"})
+        self.assertEqual(st, 200, r)
+        self.assertFalse(os.path.exists(os.path.join(self.proj, "sub")))
+        self.assertTrue(os.path.isfile(os.path.join(r["trash"], "tmp_b.py")))
+        st, r = self.req("/api/delete", {"path": "."})
+        self.assertEqual(st, 400)
+
     def test_guard(self):
         st, _ = self.req("/api/state", headers={"Host": "evil.example:80"})
         self.assertEqual(st, 403)

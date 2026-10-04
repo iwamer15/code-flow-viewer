@@ -73,6 +73,12 @@ class AnalyzeSamples(unittest.TestCase):
     def test_python_instance_types(self):
         self.has("py_app/main.py:main", "py_app/pipeline/preprocess.py:Augmenter.apply")
 
+    def test_type_hints_other_languages(self):
+        # 受け手の変数の型から解決 (add / fetch / run は一般的な名前なので、型が分からないと解決しない)
+        self.has("js_app/src/handlers.js:createUser", "js_app/src/handlers.js:UserStore.add")
+        self.has("java_app/App.java:App.main", "java_app/App.java:Service.fetch")
+        self.has("rust_app/src/main.rs:main", "rust_app/src/engine.rs:Engine.run")
+
     def test_entries(self):
         top = {self.g["symbols"][e["id"]]["f"] + ":" + self.g["symbols"][e["id"]]["q"]
                for e in self.g["entries"] if e["score"] >= 50}

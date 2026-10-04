@@ -14,9 +14,12 @@ BASE = os.path.join(os.path.expanduser("~"), ".codeflow", "backups")
 KEEP = 30
 
 
+def root_id(root: str) -> str:
+    return hashlib.sha1(os.path.realpath(root).encode("utf-8")).hexdigest()[:12]
+
+
 def _dir_for(root: str, rel: str) -> str:
-    rid = hashlib.sha1(os.path.realpath(root).encode("utf-8")).hexdigest()[:12]
-    return os.path.join(BASE, rid, *rel.split("/"))
+    return os.path.join(BASE, root_id(root), *rel.split("/"))
 
 
 def backup(root: str, rel: str, path: str) -> str | None:

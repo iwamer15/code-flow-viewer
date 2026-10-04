@@ -446,6 +446,19 @@ def indent_body(src_lines: list[str], li: int, style: str) -> int:
 # ---------------------------------------------------------------------------
 
 CALL_RE = re.compile(r"(?<![\w$])([A-Za-z_$][\w$]*[!?]?)\s*\(")
+
+# 変数の型の手がかり (クラス名は大文字始まりの慣習を利用)
+_T_NEW = _c(r"(?<![\w$.])(?P<var>[A-Za-z_$][\w$]*)\s*(?::\s*[\w.<>\[\]?, ]+?\s*)?=\s*(?:await\s+)?new\s+(?P<cls>[A-Z][\w$]*)")
+_T_CALL = _c(r"(?<![\w$.])(?P<var>[A-Za-z_][\w]*)\s*(?::\s*[\w.<>?]+\s*)?(?::=|=)\s*&?(?P<cls>[A-Z][\w]*)\s*(?:\(|\{|::new\b|\.new\b)")
+_T_DECL = _c(r"(?<![\w$.])(?P<cls>[A-Z][\w]*)(?:<[^<>;=()]*>)?\s*[*&]?\s+(?P<var>[a-z_][\w]*)\s*(?=[=;,)])")
+_T_COLON = _c(r"(?<![\w$.])(?P<var>[a-z_][\w]*)\s*\??:\s*(?P<cls>[A-Z][\w]*)\b")
+_T_GO = _c(r"(?<![\w.])(?P<var>[a-z_]\w*)\s+\*?(?P<cls>[A-Z]\w*)\b(?=\s*[,){=\n])")
+TYPE_PATTERNS_BY_LANG = {
+    "javascript": (_T_NEW,), "typescript": (_T_NEW, _T_COLON), "java": (_T_NEW, _T_DECL),
+    "csharp": (_T_NEW, _T_DECL), "cpp": (_T_NEW, _T_DECL), "dart": (_T_NEW, _T_CALL, _T_DECL),
+    "kotlin": (_T_CALL, _T_COLON), "scala": (_T_NEW, _T_CALL, _T_COLON), "swift": (_T_CALL, _T_COLON),
+    "php": (_T_NEW,), "go": (_T_CALL, _T_GO), "rust": (_T_CALL, _T_COLON), "ruby": (_T_CALL,),
+}
 _CFUNC_RE = re.compile(r"(?<![\w$.])([A-Za-z_~$][\w$]*(?:::~?[A-Za-z_]\w*)*)\s*\(")
 _CFUNC_BAD_PREFIX = re.compile(r"[=(.,!+\-/%|^?]|\b(?:return|new|else|throw|await|yield|case|delete|typeof|goto|in|of|echo|print)\b")
 _JS_MODIFIERS = frozenset("async static get set public private protected override readonly abstract".split())
@@ -644,11 +657,24 @@ def analyze_generic(rel: str, src: str, spec: Spec) -> dict:
             if name in KEYWORDS or name in SHELL_WORDS or p in def_positions:
                 continue
             calls.append((p, name, "", False))
-    calls.sort()
+    # 変数の型の手がかり (x = new Foo() / val x = Foo() / Foo x = ... / x: Foo)。recv=None の印で混ぜて流す
+    if spec.name in TYPE_PATTERNS_BY_LANG:
+        seen_t = set()
+        for pat in TYPE_PATTERNS_BY_LANG[spec.name]:
+            for m in pat.finditer(clean):
+                var, cls = m.group("var"), m.group("cls")
+                if var in KEYWORDS or cls in KEYWORDS or var == cls or (m.start("var"), var) in seen_t:
+                    continue
+                seen_t.add((m.start("var"), var))
+                calls.append((m.start("var"), var, None, cls))
+    calls.sort(key=lambda c: c[0])
 
     # 一番内側の関数へ割り当て (区間は入れ子前提のスイープ)
     stack: list[dict] = []
     fi = 0
+    file_types: dict[str, str] = {}
+    owner_types: dict[int, dict] = {}
+    pending = []     # 関数内で型が分からなかった呼び出し (後でファイル全体の型で補う)
     for p, name, recv, is_new in calls:
         while fi < len(funcs) and funcs[fi]["b"][0] <= p:
             stack.append(funcs[fi])
@@ -660,11 +686,25 @@ def analyze_generic(rel: str, src: str, spec: Spec) -> dict:
             if f["b"][0] <= p <= f["b"][1]:
                 owner = f
                 break
+        if recv is None:   # 型の手がかり
+            cls = is_new
+            if owner is not None:
+                owner_types.setdefault(id(owner), {})[name] = cls
+            file_types.setdefault(name, cls)
+            continue
         if owner is None:
             if toplevel is None or any(a <= p <= b for a, b in class_ranges):
                 continue
             owner = toplevel
-        owner["calls"].append([name, recv, li.line(p), 1 if is_new else 0])
+        # 受け手の変数の型が分かれば、受け手をクラス名に置き換える (x.run() → Foo.run を探せる)
+        typed = owner_types.get(id(owner), {}).get(recv) if recv else None
+        call = [name, typed or recv, li.line(p), 1 if is_new else 0]
+        owner["calls"].append(call)
+        if recv and not typed and recv not in ACCESSORS:
+            pending.append(call)
+    for call in pending:   # 関数の外 (フィールドやトップレベル) で型が決まっている変数
+        if call[1] in file_types:
+            call[1] = file_types[call[1]]
 
     if toplevel is not None and toplevel["calls"]:
         symbols.append(toplevel)

@@ -26,7 +26,8 @@
   <aside id="side" class="pane">
     <div class="tabs">
       <button data-side="files" class="on">ファイル</button>
-      <button data-side="tree">呼び出しツリー</button>
+      <button data-side="tree" title="起点から呼び出し順に並べたツリー">呼び出し順</button>
+      <button data-side="search">検索</button>
     </div>
     <div class="side-tools" data-for="files">
       <input id="fileFilter" placeholder="ファイル / 関数を絞り込み" spellcheck="false">
@@ -34,6 +35,14 @@
     </div>
     <div id="fileTree" class="scroll" data-for="files"></div>
     <div id="callTree" class="scroll hidden" data-for="tree"></div>
+    <div class="search-box hidden" data-for="search">
+      <div class="srow"><input id="sq" placeholder="全ファイルから検索 (Enter)" spellcheck="false">
+        <button class="tog" id="sCase" title="大文字と小文字を区別">Aa</button><button class="tog" id="sWord" title="単語単位で一致">ab</button><button class="tog" id="sRe" title="正規表現">.*</button></div>
+      <div class="srow"><input id="sRep" placeholder="置換後の文字列 (正規表現では $1 で参照)" spellcheck="false"><button id="sRepAll" title="一致したすべてを置換 (保存前の内容はバックアップ)">全置換</button></div>
+      <div class="srow"><input id="sInc" placeholder="対象 (例: *.py, src/, !tests/)" spellcheck="false"></div>
+      <div id="sInfo" class="muted sinfo"></div>
+    </div>
+    <div id="sResults" class="scroll hidden" data-for="search"></div>
   </aside>
   <div class="splitter" data-split="side"></div>
 
@@ -53,11 +62,24 @@
       <span class="grp" data-show="all modules">
         <input id="scopeInp" placeholder="パスで絞り込み (例: src/)" spellcheck="false">
       </span>
+      <span class="grp" data-show="modules">
+        <button class="ghost" id="modOpen" title="すべてのフォルダを展開">全展開</button>
+        <button class="ghost" id="modClose" title="最上位フォルダでまとめる">全たたむ</button>
+      </span>
       <span class="grp" data-show="flow all modules">
         <button id="dirBtn" class="ghost" title="縦/横レイアウト切替">↓ 縦</button>
         <label class="chk"><input type="checkbox" id="extChk"> 外部呼び出し</label>
         <button id="fitBtn" class="ghost" title="全体を表示">⤢</button>
-        <button id="pngBtn" class="ghost" title="画像として保存">PNG</button>
+      </span>
+      <span class="grp menuwrap" data-show="flow all modules chart">
+        <button id="exportBtn" class="ghost" title="図を書き出す (README・Obsidian・資料用)">書き出し ▾</button>
+        <div id="exportMenu" class="menu hidden">
+          <button data-exp="copy">Mermaid 記法をコピー<span>README / Obsidian / Copilot に貼れる</span></button>
+          <button data-exp="md">Markdown (.md) で保存<span>Mermaid 図入りのノート</span></button>
+          <button data-exp="html">HTML で保存<span>ブラウザだけで見られる1ファイル (オフライン可)</span></button>
+          <button data-exp="svg">SVG 画像で保存<span>拡大しても劣化しない</span></button>
+          <button data-exp="png">PNG 画像で保存</button>
+        </div>
       </span>
       <span class="grp" data-show="chart">
         <button id="chartBack" class="ghost" disabled>← 戻る</button>
@@ -151,9 +173,11 @@
     <div class="dlg-foot" id="diffBtns"></div>
   </div>
 </div>
+<div id="ctxMenu" class="menu hidden"></div>
 <div id="toast" class="toast hidden"></div>
 
 <script src="app.js"></script>
 <script src="run.js"></script>
+<script src="features.js"></script>
 </body>
 </html>

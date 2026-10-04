@@ -114,6 +114,9 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 .card .sec { margin-top: 8px; color: var(--muted); font-size: 11px; }
 .card .lnk { display: block; font-family: var(--mono); cursor: pointer; padding: 1px 0; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .x { position: absolute; right: 8px; top: 6px; border: 0; background: transparent; }
+.card .mini { position: absolute; right: 32px; top: 6px; border: 0; background: transparent; }
+.card.min > :not(h3):not(.x):not(.mini) { display: none; }
+.card.min { width: auto; max-width: min(340px, calc(100% - 20px)); padding-right: 60px; }
 .pill { display: inline-block; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; font-family: var(--mono); font-size: 11px; margin: 2px 2px 0 0; }
 
 .legend { position: absolute; right: 10px; top: 10px; cursor: pointer; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 11px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; max-width: 60%; z-index: 4; }
@@ -140,6 +143,31 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 .cf-range { background: rgba(91, 140, 255, .10); }
 .cf-line { background: rgba(91, 140, 255, .28); }
 
+/* search */
+.search-box { padding: 6px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid var(--line); }
+.srow { display: flex; gap: 3px; }
+.srow input { flex: 1; font-family: var(--mono); font-size: 12px; }
+.tog { padding: 2px 6px; font-family: var(--mono); font-size: 11px; background: transparent; }
+.tog.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sinfo { font-size: 11px; padding: 0 2px; }
+.sfile { padding: 4px 8px 2px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; gap: 6px; align-items: center; position: sticky; top: 0; background: var(--panel); }
+.sfile .cnt { margin-left: auto; color: var(--muted); font-weight: 400; font-size: 11px; }
+.shit { padding: 1px 8px 1px 22px; font-family: var(--mono); font-size: 11px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px; }
+.shit:hover { background: var(--panel2); }
+.shit .ln { color: var(--muted); min-width: 28px; text-align: right; flex: none; }
+.shit mark { background: rgba(245, 158, 11, .45); color: inherit; border-radius: 2px; }
+
+/* menus */
+.menuwrap { position: relative; }
+.menu { position: absolute; z-index: 30; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.2); padding: 4px; min-width: 220px; }
+#exportMenu { top: calc(100% + 4px); right: 0; }
+#ctxMenu { position: fixed; }
+.menu button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 10px; border-radius: 5px; font-size: 12px; }
+.menu button:hover { background: var(--panel2); }
+.menu button span { display: block; color: var(--muted); font-size: 11px; }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.menu .danger { color: var(--bad); }
+
 /* run panel */
 .splitter-h { height: 5px; flex: none; cursor: row-resize; background: var(--line); opacity: .6; }
 .splitter-h:hover, .splitter-h.drag { background: var(--accent); opacity: 1; }
@@ -152,6 +180,12 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 #runStatus { font-size: 12px; }
 #runStatus.ok { color: var(--ok); } #runStatus.bad { color: var(--bad); } #runStatus.live { color: var(--warn); }
 .run-body { flex: 1; display: flex; min-height: 0; }
+#runPanel { container-type: inline-size; }
+@container (max-width: 760px) {
+  .run-body { flex-direction: column; }
+  .console-wrap { border-right: 0; border-bottom: 1px solid var(--line); flex: 1.2; }
+  #hotTable .self { display: none; }
+}
 .console-wrap { flex: 1.4; display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); }
 #console { flex: 1; margin: 0; padding: 6px 10px; overflow: auto; font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-all; background: var(--bg); }
 #stdinInp { border-radius: 0; border-width: 1px 0 0; font-family: var(--mono); font-size: 12px; }

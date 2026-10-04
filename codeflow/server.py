@@ -10,7 +10,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import backups
+from . import backups, fileops
 from .languages import monaco_lang
 from .project import ENCODINGS, Project, read_text, walk
 from .runner import RunManager, find_python
@@ -131,6 +131,19 @@ class Handler(BaseHTTPRequestHandler):
                 with open(path, "w", encoding=enc, newline="") as f:
                     f.write(content)
                 return _json(self, {"ok": True, "mtime": os.stat(path).st_mtime_ns, "backup": bid})
+            if u.path == "/api/search":
+                if not PROJECT.root:
+                    return _json(self, {"error": "フォルダを読み込んでください"}, 400)
+                return _json(self, fileops.search(PROJECT.root, data.get("q", ""), bool(data.get("regex")),
+                                                  bool(data.get("case")), bool(data.get("word")), data.get("include", "")))
+            if u.path == "/api/replace":
+                return _json(self, fileops.replace(PROJECT.root, PROJECT.safe_path, data.get("q", ""), data.get("rep", ""),
+                                                   list(data.get("files") or []), bool(data.get("regex")),
+                                                   bool(data.get("case")), bool(data.get("word"))))
+            if u.path == "/api/rename":
+                return _json(self, fileops.rename(PROJECT.safe_path, data["path"], data["to"]))
+            if u.path == "/api/delete":
+                return _json(self, fileops.delete(PROJECT.root, PROJECT.safe_path, data["path"]))
             if u.path == "/api/run/start":
                 if not PROJECT.root:
                     return _json(self, {"error": "フォルダを読み込んでください"}, 400)
