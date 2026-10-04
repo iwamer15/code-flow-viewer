@@ -18,7 +18,9 @@ function start() {
   const path = require('path');
   const { fileURLToPath } = require('url');
 
-  const ROOT = fs.realpathSync(process.env.CODEFLOW_ROOT || process.cwd());
+  // Windows の短いパス名 (C:\Users\RUNNER~1\...) を正式な名前に直すため native 版を使う
+  const realpath = fs.realpathSync.native || fs.realpathSync;
+  const ROOT = realpath(process.env.CODEFLOW_ROOT || process.cwd());
   const COUNT = process.env.CODEFLOW_COUNT !== '0';
   const t0 = Date.now();
   const session = new inspector.Session();
@@ -41,7 +43,7 @@ function start() {
     try {
       const p = u.startsWith('file://') ? fileURLToPath(u) : (path.isAbsolute(u) ? u : '');
       if (p) {
-        const rel = path.relative(ROOT, fs.realpathSync(p));
+        const rel = path.relative(ROOT, realpath(p));
         if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
           const parts = rel.split(path.sep);
           if (!parts.slice(0, -1).some((x) => x === 'node_modules' || x.startsWith('.'))) r = parts.join('/');

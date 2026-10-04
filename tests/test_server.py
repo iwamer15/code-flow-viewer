@@ -192,7 +192,7 @@ class ServerTest(unittest.TestCase):
             snap = s["snapshot"]
             self.assertTrue(snap and snap["done"], s)
             names = {(f[0], f[2]): f[3] for f in snap["fn"]}
-            self.assertEqual(names.get(("web/app.js", "main")), 1)
+            self.assertEqual(names.get(("web/app.js", "main")), 1, snap["fn"])
             self.assertEqual(names.get(("web/app.js", "add")), 5)
             self.assertEqual(names.get(("web/lib.js", "helper")), 5)
             self.assertIn("こんにちは", s["text"])

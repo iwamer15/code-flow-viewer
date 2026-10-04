@@ -7,7 +7,17 @@ import sys
 from .server import serve
 
 
+def _safe_console():
+    """日本語を表示できないコンソール (cp1252 など) で print が落ちないようにする。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main():
+    _safe_console()
     ap = argparse.ArgumentParser(prog="codeflow", description="ソースコードの処理フロー可視化 + エディタ")
     ap.add_argument("root", nargs="?", default=None, help="読み込むフォルダ (省略時はカレントフォルダ)")
     ap.add_argument("--port", type=int, default=8765)

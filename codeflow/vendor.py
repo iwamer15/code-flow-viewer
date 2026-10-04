@@ -9,6 +9,7 @@ import os
 import shutil
 import ssl
 import subprocess
+import sys
 import tarfile
 import urllib.error
 import urllib.request
@@ -46,6 +47,11 @@ def fetch(url: str) -> bytes:
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):   # 日本語を表示できないコンソールでも落ちないように
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     os.makedirs(VENDOR, exist_ok=True)
     for name, url in FILES.items():
         print("download", name)
