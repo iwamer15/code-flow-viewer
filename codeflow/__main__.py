@@ -1,0 +1,22 @@
+"""python -m codeflow [フォルダ] [--port 8765] [--no-browser]"""
+import argparse
+import multiprocessing
+import os
+
+from .server import serve
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="codeflow", description="ソースコードの処理フロー可視化 + エディタ")
+    ap.add_argument("root", nargs="?", default=None, help="読み込むフォルダ (省略時はカレントフォルダ)")
+    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--no-browser", action="store_true", help="ブラウザを自動で開かない")
+    ap.add_argument("--ask", action="store_true", help="フォルダを指定せず起動し、画面で選ぶ (前回のフォルダを復元)")
+    a = ap.parse_args()
+    root = a.root or (None if a.ask else os.getcwd())
+    serve(root, a.port, not a.no_browser)
+
+
+if __name__ == "__main__":
+    multiprocessing.freeze_support()  # Windows の exe 化対策
+    main()

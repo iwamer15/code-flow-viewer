@@ -1,0 +1,15 @@
+[project]
+name = "code-flow-viewer"
+version = "0.1.0"
+description = "フォルダ配下のソースを解析し、起動からの処理の流れをフローチャートで可視化 + 編集できるローカルツール"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+codeflow = "codeflow.__main__:main"
+
+[tool.setuptools]
+packages = ["codeflow"]
+
+[tool.setuptools.package-data]
+codeflow = ["static/*", "static/vendor/**/*"]

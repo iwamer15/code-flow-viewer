@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code Flow Viewer</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><path d='M9 8h8v6H9zM15 18h8v6h-8zM13 14v4h6' stroke='white' stroke-width='2' fill='none'/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">⟿</span> Code Flow</div>
+  <div class="rootbox">
+    <input id="rootInput" spellcheck="false" placeholder="読み込むフォルダのパス (例: C:\work\project)">
+    <button id="browseBtn" title="フォルダを選ぶ">📁</button>
+    <button id="loadBtn" class="primary">読み込み</button>
+  </div>
+  <button id="runToggle" title="プログラムを実行して、処理がどこまで進んだかを図に表示">▶ 実行</button>
+  <label class="chk" title="外部エディタでの変更を検知して自動で再解析"><input type="checkbox" id="autoReload" checked> 自動更新</label>
+  <div id="stats" class="stats"></div>
+  <button id="themeBtn" class="ghost" title="ライト/ダーク切替">◐</button>
+</header>
+
+<main id="layout">
+  <!-- 左: ファイル / 呼び出しツリー -->
+  <aside id="side" class="pane">
+    <div class="tabs">
+      <button data-side="files" class="on">ファイル</button>
+      <button data-side="tree">呼び出しツリー</button>
+    </div>
+    <div class="side-tools" data-for="files">
+      <input id="fileFilter" placeholder="ファイル / 関数を絞り込み" spellcheck="false">
+      <button id="newFileBtn" class="ghost" title="新しいファイル">＋</button>
+    </div>
+    <div id="fileTree" class="scroll" data-for="files"></div>
+    <div id="callTree" class="scroll hidden" data-for="tree"></div>
+  </aside>
+  <div class="splitter" data-split="side"></div>
+
+  <!-- 中央: グラフ -->
+  <section id="center" class="pane">
+    <div class="toolbar">
+      <div class="seg" id="viewSeg">
+        <button data-view="flow" class="on" title="起点から呼び出しを順にたどる">起動フロー</button>
+        <button data-view="all" title="全関数の呼び出し関係">全体</button>
+        <button data-view="modules" title="ファイル間の import 依存 (パイプライン)">モジュール依存</button>
+        <button data-view="chart" title="選択した関数の中身 (分岐・ループ)">関数フローチャート</button>
+      </div>
+      <span class="grp" data-show="flow">
+        <label>起点</label><select id="entrySel"></select>
+        <label>深さ</label><input id="depthInp" type="number" min="1" max="30" value="4">
+      </span>
+      <span class="grp" data-show="all modules">
+        <input id="scopeInp" placeholder="パスで絞り込み (例: src/)" spellcheck="false">
+      </span>
+      <span class="grp" data-show="flow all modules">
+        <button id="dirBtn" class="ghost" title="縦/横レイアウト切替">↓ 縦</button>
+        <label class="chk"><input type="checkbox" id="extChk"> 外部呼び出し</label>
+        <button id="fitBtn" class="ghost" title="全体を表示">⤢</button>
+        <button id="pngBtn" class="ghost" title="画像として保存">PNG</button>
+      </span>
+      <span class="grp" data-show="chart">
+        <button id="chartBack" class="ghost" disabled>← 戻る</button>
+        <span id="chartTitle" class="muted"></span>
+      </span>
+      <input id="searchInp" list="symList" placeholder="関数を検索…" spellcheck="false">
+      <datalist id="symList"></datalist>
+    </div>
+    <div id="graphWrap">
+      <div id="cy"></div>
+      <div id="chartWrap" class="hidden"><div id="chartInner"></div></div>
+      <div id="empty" class="empty">
+        <h2>フォルダを読み込んでください</h2>
+        <p>上の欄にパスを入力して「読み込み」を押すと、配下のソースを解析して<br>起動から処理がどう流れるかをフローチャートで表示します。</p>
+        <p class="muted">対応: Python / JavaScript / TypeScript / Java / Kotlin / C / C++ / C# / Go / Rust / Swift / PHP / Ruby / Lua / Shell / PowerShell / R / Dart / Scala</p>
+      </div>
+      <div id="details" class="card hidden"></div>
+      <div id="legend" class="legend"></div>
+      <div id="busy" class="busy hidden"><div class="spin"></div><span>解析中…</span></div>
+    </div>
+    <div id="callees" class="chips hidden"></div>
+    <div class="splitter-h hidden" id="runSplit"></div>
+    <div id="runPanel" class="runpanel hidden">
+      <div class="run-bar">
+        <select id="runMode" title="Python は関数ごとの実行状況を図に表示します">
+          <option value="python">Python（進み具合を表示）</option>
+          <option value="command">コマンド（出力のみ）</option>
+        </select>
+        <span class="grp" data-run="python">
+          <input id="runTarget" list="pyFiles" placeholder="実行するファイル (例: main.py / -m パッケージ名)" spellcheck="false">
+          <datalist id="pyFiles"></datalist>
+          <input id="runArgs" placeholder="引数 (例: --epochs 3)" spellcheck="false">
+        </span>
+        <span class="grp hidden" data-run="command">
+          <input id="runCmd" placeholder="例: node src/server.js / go run . / bash deploy.sh" spellcheck="false">
+        </span>
+        <button id="runBtn" class="primary">▶ 実行</button>
+        <button id="stopBtn" disabled>■ 停止</button>
+        <span id="runStatus" class="muted"></span>
+        <label class="chk" title="実行中の行をエディタで自動表示"><input type="checkbox" id="followChk"> 追従</label>
+        <button id="runOpts" class="ghost" title="Python の場所・作業フォルダ">⚙</button>
+        <button id="runClose" class="ghost" title="閉じる">✕</button>
+      </div>
+      <div id="runOptsRow" class="run-bar hidden">
+        <label>Python</label><input id="runPython" spellcheck="false" class="mono">
+        <label>作業フォルダ</label><input id="runCwd" placeholder="(読み込んだフォルダ)" spellcheck="false" class="mono">
+      </div>
+      <div class="run-body">
+        <div class="console-wrap">
+          <pre id="console"></pre>
+          <input id="stdinInp" placeholder="プログラムへの入力 (input() など) — Enter で送信" spellcheck="false" disabled>
+        </div>
+        <div class="hot">
+          <div class="hot-head">いま実行中</div>
+          <div id="runStack" class="runstack"><span class="muted">—</span></div>
+          <div class="hot-head">関数ごとの実行状況 <span class="muted">(累計時間順)</span></div>
+          <div class="hot-scroll"><table id="hotTable"></table></div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="splitter" data-split="editor"></div>
+
+  <!-- 右: エディタ -->
+  <section id="editorPane" class="pane">
+    <div id="tabs" class="etabs"></div>
+    <div id="editor"></div>
+    <div id="editorEmpty" class="empty small">グラフのノードやファイルをクリックするとここで編集できます<br><span class="muted">Ctrl/⌘+S で保存 ・ Ctrl/⌘+クリック で定義へジャンプ</span></div>
+    <div class="statusbar"><span id="stLeft"></span><span><span id="stRight"></span> <button id="histBtn" class="link" title="保存前の自動バックアップから復元">🕘 履歴</button></span></div>
+  </section>
+</main>
+
+<div id="modal" class="modal hidden">
+  <div class="dialog">
+    <div class="dlg-head"><b>フォルダを選択</b><button class="ghost" id="modalClose">✕</button></div>
+    <div class="dlg-path"><button class="ghost" id="upBtn">↑ 上へ</button><input id="browsePath" spellcheck="false"></div>
+    <div id="drives" class="drives"></div>
+    <div id="dirList" class="dirlist"></div>
+    <div class="dlg-foot"><button id="pickBtn" class="primary">このフォルダを読み込む</button></div>
+  </div>
+</div>
+<div id="diffModal" class="modal hidden">
+  <div class="dialog wide">
+    <div class="dlg-head"><b id="diffTitle"></b><button class="ghost" id="diffClose">✕</button></div>
+    <div id="diffNote" class="dlg-note"></div>
+    <div class="diff-body">
+      <div id="diffList" class="difflist hidden"></div>
+      <div id="diffEditor"></div>
+    </div>
+    <div class="dlg-foot" id="diffBtns"></div>
+  </div>
+</div>
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+<script src="run.js"></script>
+</body>
+</html>
