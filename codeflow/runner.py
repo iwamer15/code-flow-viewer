@@ -26,12 +26,20 @@ IS_WIN = sys.platform == "win32"
 
 
 def find_python(root: str) -> str:
-    """プロジェクト内の仮想環境があればその Python、なければこのツールを動かしている Python。"""
+    """プロジェクト内の仮想環境があればその Python。なければこのツールを動かしている Python
+    (exe 版のときは exe 自身は Python ではないので、PC にインストールされている Python を探す)。"""
     for d in (".venv", "venv", "env"):
         for p in (("Scripts", "python.exe"), ("bin", "python3"), ("bin", "python")):
             cand = os.path.join(root, d, *p)
             if os.path.isfile(cand):
                 return cand
+    if getattr(sys, "frozen", False):
+        for name in ("python", "python3", "py"):
+            found = shutil.which(name)
+            # Windows の「アプリ実行エイリアス」(Microsoft Store を開くだけの python.exe) は除く
+            if found and "WindowsApps" not in found:
+                return found
+        return "python"
     return sys.executable
 
 

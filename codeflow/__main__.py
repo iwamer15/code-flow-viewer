@@ -2,6 +2,7 @@
 import argparse
 import multiprocessing
 import os
+import sys
 
 from .server import serve
 
@@ -13,7 +14,9 @@ def main():
     ap.add_argument("--no-browser", action="store_true", help="ブラウザを自動で開かない")
     ap.add_argument("--ask", action="store_true", help="フォルダを指定せず起動し、画面で選ぶ (前回のフォルダを復元)")
     a = ap.parse_args()
-    root = a.root or (None if a.ask else os.getcwd())
+    # exe をダブルクリックしたときは、カレントフォルダ(=exe の場所)ではなく画面でフォルダを選ぶ
+    frozen = getattr(sys, "frozen", False)
+    root = a.root or (None if (a.ask or frozen) else os.getcwd())
     serve(root, a.port, not a.no_browser)
 
 

@@ -249,6 +249,19 @@ def serve(root: str | None, port: int, open_browser: bool):
     if open_browser:
         import webbrowser
         webbrowser.open(url)
+
+    # 終了シグナル (kill / ウィンドウを閉じる) でも Ctrl+C と同じ後片付けをする
+    # (並列解析のワーカーや実行中のプログラムを残さないため)
+    import signal
+
+    def _stop(*_a):
+        raise KeyboardInterrupt
+    for name in ("SIGTERM", "SIGHUP", "SIGBREAK"):
+        if hasattr(signal, name):
+            try:
+                signal.signal(getattr(signal, name), _stop)
+            except (ValueError, OSError):
+                pass
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

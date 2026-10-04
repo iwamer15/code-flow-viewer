@@ -3,3 +3,5 @@ __pycache__/
 codeflow/static/vendor/
 .DS_Store
 .claude/
+build/
+dist/

@@ -6,10 +6,21 @@
 
 - **インストール不要**: Python 3.9 以上の標準ライブラリだけで動きます (pip install なし)
 - **Mac / Windows 両対応**: パス・文字コード(UTF-8 / Shift_JIS(cp932) / EUC-JP)・改行コードを保持して保存
-- **実行して進み具合を見る**: Python は実行中の関数・呼び出し回数・時間・例外の箇所を図とエディタに表示
+- **実行して進み具合を見る**: Python / Node.js は実行中の関数・呼び出し回数・時間・例外の箇所を図とエディタに表示
+- **エディタ**: 保存時の外部変更チェック・自動バックアップ・全ファイル検索置換・名前変更/削除・定義ジャンプ
+- **書き出し**: 図を Mermaid / Markdown / 単体 HTML / SVG / PNG で README・Obsidian・資料へ
 - **19 言語に対応**: Python / JavaScript / TypeScript / Java / Kotlin / Scala / C / C++(Arduino .ino 含む) / C# / Go / Rust / Swift / PHP / Dart / R / PowerShell / Ruby / Lua / Shell
 
 ## 起動
+
+### Windows で Python を入れずに使う (exe 版)
+
+[Releases](https://github.com/iwamer15/code-flow-viewer/releases) から `CodeFlowViewer-windows.zip` をダウンロード →
+展開 → 中の `CodeFlowViewer.exe` をダブルクリック → ブラウザが開くので、フォルダを選んで「読み込み」。
+画面のライブラリも同梱しているので、ネットに繋がらない PC でも動きます。
+(Python のプログラムを ▶ 実行 するときだけ、その PC の Python を使います)
+
+### Python から起動
 
 ```bash
 # mac
@@ -36,7 +47,7 @@ py -m codeflow C:\work\project
 ネットに繋がらない PC で使う場合は、ネットに繋がる PC で一度だけ次を実行し、フォルダごとコピーしてください。
 
 ```bash
-python3 -m codeflow.vendor      # codeflow/static/vendor/ に取得 (約 15MB)
+python3 -m codeflow.vendor      # codeflow/static/vendor/ に取得 (約 17MB)
 ```
 
 `vendor/` があればそちらが優先され、CDN には接続しません。
@@ -45,13 +56,14 @@ python3 -m codeflow.vendor      # codeflow/static/vendor/ に取得 (約 15MB)
 
 | 場所 | 内容 |
 |---|---|
-| 左: ファイル | ツリー表示。ファイルを開くと関数一覧。絞り込み欄はファイル名・関数名の両方に効く。`＋` で新規ファイル |
-| 左: 呼び出しツリー | 起点から呼び出し順に並べたツリー (番号=その関数内で呼ぶ順番、↺=再帰、…=既出) |
+| 左: ファイル | ツリー表示。ファイルを開くと関数一覧。絞り込み欄はファイル名・関数名の両方に効く。`＋` で新規ファイル。**右クリック**で名前変更・移動 / 削除 / 新規 / パスのコピー |
+| 左: 呼び出し順 | 起点から呼び出し順に並べたツリー (番号=その関数内で呼ぶ順番、↺=再帰、…=既出) |
+| 左: 検索 | 全ファイル検索・置換 (Ctrl/⌘+Shift+F)。大文字小文字 / 単語単位 / 正規表現、対象の絞り込み (`*.py, src/, !tests/`) |
 | 中央: 起動フロー | 起点(エントリーポイント)から呼び出しを深さ N までたどった図。矢印の数字が呼ぶ順番 |
 | 中央: 全体 | 全関数の呼び出し関係。パスで絞り込み可 |
-| 中央: モジュール依存 | ファイル間の import 関係 (パイプライン表示) |
+| 中央: モジュール依存 | ファイル間の import 関係。多いときはフォルダ単位にまとめ、クリックで展開 (全展開 / 全たたむ) |
 | 中央: 関数フローチャート | 選んだ関数の中身を if / for / while / switch / try / return 単位のフローチャートに |
-| 右: エディタ | タブ切替・保存(Ctrl/⌘+S)・Ctrl/⌘+クリック(F12)で定義へジャンプ・ホバーで呼び出し元/先の数 |
+| 右: エディタ | タブ切替・保存(Ctrl/⌘+S)・Ctrl/⌘+クリック(F12)で定義へジャンプ (解析済みの呼び出し関係から。候補が複数なら一覧)・ホバーで呼び出し元/先の数 |
 
 操作:
 - ノードをクリック → 詳細カード(呼び出し先/元・外部呼び出し) + エディタで該当関数を範囲ハイライト
@@ -61,7 +73,8 @@ python3 -m codeflow.vendor      # codeflow/static/vendor/ に取得 (約 15MB)
 - エディタのカーソル位置の関数がグラフ上でハイライトされる
 - 保存すると自動で再解析して図が更新される。**自動更新** が ON なら VS Code など外部で編集しても 3 秒以内に反映
   (未保存の変更があるタブは上書きしない)
-- PNG ボタンで図を画像保存
+- **書き出し ▾**: Mermaid 記法をコピー (README / Obsidian / Copilot に貼れる) / Markdown / 単体 HTML (オフラインで見られる) / SVG / PNG
+- 表示形式・起点・深さ・展開状態・開いていたタブは**フォルダごとに記憶**し、次に開いたとき復元
 
 ## ▶ 実行と進み具合の表示
 
@@ -70,7 +83,11 @@ python3 -m codeflow.vendor      # codeflow/static/vendor/ に取得 (約 15MB)
 | モード | できること |
 |---|---|
 | **Python（進み具合を表示）** | 実行するファイル(または `-m パッケージ名`)と引数を指定して実行。図・エディタ・フローチャートに実行状況を表示 |
-| **コマンド（出力のみ）** | `node src/server.js` `go run .` `bash deploy.sh` など任意のコマンド。出力・入力・停止のみ (図への反映なし) |
+| **Node.js（進み具合を表示）** | `.js` / `.mjs` / `.cjs` を実行。Python と同じ表示 (Node.js 標準の inspector を使用、追加インストール不要) |
+| **コマンド（出力のみ）** | `go run .` `bash deploy.sh` `npx tsx src/main.ts` など任意のコマンド。出力・入力・停止のみ (図への反映なし) |
+
+Node.js の注意: 「いま実行中」は直前 0.3 秒で最後に実行していた位置です。同期処理で塞がっている間は表示が更新されません。
+async 関数の回数は await からの再開も数えます。TypeScript は対象外 (コマンドモードで実行できます)。
 
 Python 実行中の表示:
 - 図: **黄色=いま実行中の関数**、オレンジ枠と矢印=そこまでの呼び出し経路、緑枠=実行済み、終了後に**薄い=今回呼ばれなかった関数**、赤=例外が起きた関数
@@ -103,6 +120,8 @@ Python 実行中の表示:
   未保存の編集中に外部で変更されると、タブに ⚠ が付きます
 - **自動バックアップ**: このツールで保存するたびに、保存前の内容を `~/.codeflow/backups/` に残します (1ファイル30件まで。プロジェクトフォルダは汚しません)
 - **🕘 履歴** (エディタ右下): バックアップと現在の内容を差分で比べ、選んだ版をエディタに戻せます
+- **一括置換** も置換前の内容をバックアップします。**削除** は完全には消さず `~/.codeflow/trash/` へ移動します
+- 別のフォルダを読み込むと、前のフォルダのタブは閉じます (同じ相対パスで別フォルダに保存してしまわないように)
 
 線の種類: 実線=呼び出し / 紫の点線=コールバック登録 (`Thread(target=f)`, `button.clicked.connect(self.on_click)` など、Python) /
 破線=同名候補が複数あり推定 / オレンジ破線=再帰・既に出た関数への呼び出し
@@ -122,7 +141,7 @@ Python 実行中の表示:
 | 項目 | 方式 |
 |---|---|
 | Python | 標準ライブラリ `ast` で正確に解析。`import x as y` / `from . import` の別名、`self.method()`、`x = Klass()` からの型推定、コールバック参照に対応 |
-| その他の言語 | コメント・文字列を空白化したテキストに対して、言語ごとの定義パターン + 括弧の対応表で関数範囲を特定し、呼び出しを抽出 (依存ライブラリなし・高速) |
+| その他の言語 | コメント・文字列を空白化したテキストに対して、言語ごとの定義パターン + 括弧の対応表で関数範囲を特定し、呼び出しを抽出 (依存ライブラリなし・高速)。変数の型推定 (`x = new Foo()` / `val x = Foo()` / `Foo x` / `x: Foo` / `x := &Foo{}` / `Foo::new()`) で `x.run()` の行き先を特定 |
 | 呼び出しの解決 | import 別名 → 同じクラス → 同じファイル → import 先ファイル → プロジェクト全体で一意な名前、の順。候補が 2〜3 個なら破線で全部つなぐ |
 | 速度 | 変更のあったファイルだけ再解析 (キャッシュ)。大量・大容量のときはマルチプロセスで並列解析 |
 
@@ -143,16 +162,19 @@ codeflow/
   pyanalyzer.py   Python 解析 (ast)
   languages.py    言語定義 + 汎用解析 + 関数内フロー抽出 (if/for/switch/try…)
   vendor.py       オフライン用ライブラリ取得
+  fileops.py      全ファイル検索・置換、名前変更、削除(ゴミ箱へ)
   runner.py       プログラムの起動・出力・入力・停止
-  tracer.py       実行トレーサ (対象プログラムと同じプロセスで動く。標準ライブラリのみ)
+  tracer.py       Python 実行トレーサ (対象プログラムと同じプロセスで動く。標準ライブラリのみ)
+  tracer_node.js  Node.js 実行トレーサ (node --require で読み込む)
   backups.py      保存前の自動バックアップ
-  static/         画面 (index.html / app.js / run.js / style.css。ビルド不要)
+  static/         画面 (index.html / app.js / run.js / features.js / style.css。ビルド不要)
+run_codeflow.py, codeflow_viewer.spec   exe 化 (PyInstaller。GitHub Actions で v*.*.* タグ時に Release へ添付)
 samples/          動作確認用の多言語サンプル
 tests/            python -m unittest discover tests  (GitHub Actions で Windows/Mac/Linux × Python 3.9/3.11/3.13)
 ```
 
 ## 今後の拡張候補
 
-- Python 以外の言語の実行トレース (Node.js の inspector など)
+- Python / Node.js 以外の実行トレース (Java, Go など)
 - web-editor (OneDrive 連携エディタ) へのパイプライン可視化機能としての組み込み
-- tree-sitter (任意インストール) による他言語の解析精度向上
+- tree-sitter (任意インストール) による他言語の解析精度向上。標準ライブラリだけで動く方針と両立させるため、入っていれば使う形を想定

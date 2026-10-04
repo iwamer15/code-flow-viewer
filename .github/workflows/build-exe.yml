@@ -1,0 +1,86 @@
+name: Build Windows EXE
+
+# 目的:
+#   - main への push / PR、手動実行のたびに windows-latest で PyInstaller ビルドが通ることを確認する
+#     (動作確認用のビルド成果物も添付)
+#   - "v*.*.*" 形式のタグを push すると GitHub Releases を作成し、次の2つを添付する
+#       - CodeFlowViewer-windows.zip  展開して中の CodeFlowViewer.exe をダブルクリック (Python のインストール不要)
+#       - CodeFlowViewer-source.zip   そのタグ時点のソース一式 (python -m codeflow で起動)
+#   - exe 1個 (onefile) ではなくフォルダ形式: onefile は起動のたびに展開+ウイルス検査で約10秒かかったため
+#   - 画面のライブラリ (Monaco 等) も同梱するので、社内のネットに繋がらない PC でも動く
+#
+# 使い方:
+#   git tag v0.3.0
+#   git push origin v0.3.0
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Fetch UI libraries (オフライン用に同梱)
+        run: python -m codeflow.vendor
+
+      - name: Build with PyInstaller
+        run: pyinstaller codeflow_viewer.spec --noconfirm --clean
+
+      - name: Smoke test (exe が起動して API に応答するか)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist/CodeFlowViewer/CodeFlowViewer.exe -ArgumentList "samples","--no-browser","--port","8799" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 30; $i++) { Start-Sleep -Seconds 1; try { Invoke-WebRequest http://127.0.0.1:8799/ -UseBasicParsing | Out-Null; $ok = $true; break } catch {} }
+          if (-not $ok) { throw "exe did not start" }
+          $r = Invoke-RestMethod -Uri http://127.0.0.1:8799/api/scan -Method Post -ContentType "application/json" -Body "{}"
+          if ($r.stats.symbols -lt 10) { throw "scan failed" }
+          Write-Host ("symbols: " + $r.stats.symbols)
+          $body = '{"mode":"python","target":"py_app/main.py","cwd":"py_app","args":"--epochs 2","count":true}'
+          Invoke-RestMethod -Uri http://127.0.0.1:8799/api/run/start -Method Post -ContentType "application/json" -Body $body | Out-Null
+          Start-Sleep -Seconds 5
+          $s = Invoke-RestMethod -Uri "http://127.0.0.1:8799/api/run/status?since=0"
+          Write-Host ("run code: " + $s.code + " / traced functions: " + $s.snapshot.fn.Count)
+          Stop-Process -Id $p.Id -Force
+          if ($s.code -ne 0 -or $s.snapshot.fn.Count -lt 5) { throw ("traced run failed: " + $s.text) }
+
+      - name: Package
+        run: |
+          Compress-Archive -Path dist/CodeFlowViewer -DestinationPath CodeFlowViewer-windows.zip -Force
+          git archive --format=zip --prefix=code-flow-viewer/ -o CodeFlowViewer-source.zip HEAD
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodeFlowViewer-windows
+          path: CodeFlowViewer-windows.zip
+
+      - name: Create GitHub Release (タグ push 時のみ)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            CodeFlowViewer-windows.zip
+            CodeFlowViewer-source.zip
+          generate_release_notes: true
