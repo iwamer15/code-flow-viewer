@@ -106,9 +106,10 @@
       <div class="run-bar">
         <select id="runMode" title="Python は関数ごとの実行状況を図に表示します">
           <option value="python">Python（進み具合を表示）</option>
+          <option value="node">Node.js（進み具合を表示）</option>
           <option value="command">コマンド（出力のみ）</option>
         </select>
-        <span class="grp" data-run="python">
+        <span class="grp" data-run="python node">
           <input id="runTarget" list="pyFiles" placeholder="実行するファイル (例: main.py / -m パッケージ名)" spellcheck="false">
           <datalist id="pyFiles"></datalist>
           <input id="runArgs" placeholder="引数 (例: --epochs 3)" spellcheck="false">
@@ -124,9 +125,10 @@
         <button id="runClose" class="ghost" title="閉じる">✕</button>
       </div>
       <div id="runOptsRow" class="run-bar hidden">
-        <label>Python</label><input id="runPython" spellcheck="false" class="mono">
+        <span class="grp" data-run="python"><label>Python</label><input id="runPython" spellcheck="false" class="mono"></span>
+        <span class="grp hidden" data-run="node"><label>node</label><input id="runNode" spellcheck="false" class="mono" placeholder="node"></span>
         <label>作業フォルダ</label><input id="runCwd" placeholder="(読み込んだフォルダ)" spellcheck="false" class="mono">
-        <label class="chk" title="Python 3.12 以降は常に数えます (ほぼ遅くなりません)。3.11 以前で数えると、処理によっては数倍遅くなります"><input type="checkbox" id="runCount"> 3.11以前でも呼び出し回数を数える</label>
+        <label class="chk" data-run="python" title="Python 3.12 以降は常に数えます (ほぼ遅くなりません)。3.11 以前で数えると、処理によっては数倍遅くなります"><input type="checkbox" id="runCount"> 3.11以前でも呼び出し回数を数える</label>
       </div>
       <div class="run-body">
         <div class="console-wrap">

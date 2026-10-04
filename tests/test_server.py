@@ -167,6 +167,38 @@ class ServerTest(unittest.TestCase):
         self.assertIn("ValueError: こんにちは", s["text"])
         self.assertNotIn("tracer.py", s["text"])
 
+    @unittest.skipUnless(shutil.which("node"), "Node.js がありません")
+    def test_run_node(self):
+        os.makedirs(os.path.join(self.proj, "web"), exist_ok=True)
+        with open(os.path.join(self.proj, "web", "lib.js"), "w", encoding="utf-8") as f:
+            f.write("function helper(x) { return x * 2; }\nmodule.exports = { helper };\n")
+        with open(os.path.join(self.proj, "web", "app.js"), "w", encoding="utf-8") as f:
+            f.write("const { helper } = require('./lib');\n"
+                    "class Store { add(x) { return helper(x); } }\n"
+                    "function main() {\n  const s = new Store();\n  for (let i = 0; i < 5; i++) s.add(i);\n"
+                    "  console.log('こんにちは');\n  if (process.argv[2] === 'boom') throw new RangeError('oops');\n}\n"
+                    "main();\n")
+        while self.req("/api/run/status?since=0")[1].get("running"):
+            time.sleep(0.1)
+        for args, code in (("", 0), ("boom", 1)):
+            st, r = self.req("/api/run/start", {"mode": "node", "target": "web/app.js", "args": args})
+            self.assertEqual(st, 200, r)
+            for _ in range(100):
+                time.sleep(0.1)
+                st, s = self.req("/api/run/status?since=0")
+                if not s["running"]:
+                    break
+            self.assertEqual(s["code"], code, s["text"])
+            snap = s["snapshot"]
+            self.assertTrue(snap and snap["done"], s)
+            names = {(f[0], f[2]): f[3] for f in snap["fn"]}
+            self.assertEqual(names.get(("web/app.js", "main")), 1)
+            self.assertEqual(names.get(("web/app.js", "add")), 5)
+            self.assertEqual(names.get(("web/lib.js", "helper")), 5)
+            self.assertIn("こんにちは", s["text"])
+        self.assertEqual(snap["exc"]["type"], "RangeError")
+        self.assertEqual(snap["exc"]["where"], ["web/app.js", 7])
+
     def test_run_stop(self):
         with open(os.path.join(self.proj, "loop.py"), "w", encoding="utf-8") as f:
             f.write("import time\n\ndef work():\n    time.sleep(0.05)\n\nwhile True:\n    work()\n")

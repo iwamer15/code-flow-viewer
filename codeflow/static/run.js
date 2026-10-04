@@ -21,7 +21,7 @@ function saveRunPrefs() {
   try {
     localStorage.setItem(runKey(), JSON.stringify({
       mode: $('#runMode').value, target: $('#runTarget').value, args: $('#runArgs').value, cmd: $('#runCmd').value,
-      python: $('#runPython').value, cwd: $('#runCwd').value, count: $('#runCount').checked,
+      python: $('#runPython').value, node: $('#runNode').value, cwd: $('#runCwd').value, count: $('#runCount').checked,
     }));
   } catch (e) { /* 無視 */ }
 }
@@ -32,6 +32,10 @@ function loadRunPrefs() {
 // 読み込み・起点変更時に、実行対象の候補と既定値を用意する
 async function prepareRun() {
   if (!S.data) return;
+  const js = S.data.files.filter((f) => f.lang === 'javascript').map((f) => f.p);
+  const jsEntry = new Set(S.data.entries.filter((e) => e.score >= 30).map((e) => S.sym[e.id]?.f).filter((f) => f && /\.[cm]?js$/.test(f)));
+  if (!$('#jsFiles')) $('#pyFiles').insertAdjacentHTML('afterend', '<datalist id="jsFiles"></datalist>');
+  $('#jsFiles').innerHTML = [...jsEntry, ...js.filter((p) => !jsEntry.has(p))].slice(0, 500).map((p) => `<option value="${esc(p)}">`).join('');
   const py = S.data.files.filter((f) => f.lang === 'python');
   const entryFiles = new Set(S.data.entries.filter((e) => e.score >= 30).map((e) => S.sym[e.id]?.f).filter((f) => f && f.endsWith('.py')));
   const ordered = [...entryFiles, ...py.map((f) => f.p).filter((p) => !entryFiles.has(p))];
@@ -49,6 +53,7 @@ async function prepareRun() {
     const cfg = await api('/api/run/config');
     if (!prefs?.python) $('#runPython').value = cfg.python || '';
     else $('#runPython').value = prefs.python;
+    $('#runNode').value = prefs?.node || cfg.node || '';
     $('#runPython').title = cfg.venv ? 'プロジェクト内の仮想環境を自動で選びました' : 'このツールを動かしている Python';
   } catch (e) { /* 無視 */ }
   if (!prefs) suggestFromEntry();
@@ -58,6 +63,7 @@ function suggestFromEntry() {
   const s = S.sym[S.entry]; if (!s) return;
   const lang = S.files.get(s.f)?.lang;
   if (lang === 'python') { $('#runMode').value = 'python'; $('#runTarget').value = s.f; }
+  else if (lang === 'javascript') { $('#runMode').value = 'node'; $('#runTarget').value = s.f; }
   else if (CMD_HINT[lang]) {
     $('#runMode').value = 'command';
     const dir = s.f.includes('/') ? s.f.slice(0, s.f.lastIndexOf('/')) : '';
@@ -70,7 +76,9 @@ function suggestFromEntry() {
 }
 function updateRunMode() {
   const m = $('#runMode').value;
-  $$('#runPanel [data-run]').forEach((el) => el.classList.toggle('hidden', el.dataset.run !== m));
+  $$('#runPanel [data-run]').forEach((el) => el.classList.toggle('hidden', !el.dataset.run.split(' ').includes(m)));
+  $('#runTarget').setAttribute('list', m === 'node' ? 'jsFiles' : 'pyFiles');
+  $('#runTarget').placeholder = m === 'node' ? '実行するファイル (例: src/server.js)' : '実行するファイル (例: main.py / -m パッケージ名)';
 }
 
 function toggleRunPanel(show) {
@@ -92,7 +100,12 @@ async function startRun() {
   }
   const mode = $('#runMode').value;
   const spec = { mode, cwd: $('#runCwd').value.trim() };
-  if (mode === 'python') {
+  if (mode === 'node') {
+    spec.target = $('#runTarget').value.trim();
+    if (!spec.target) { toast('実行するファイルを入力してください', true); return; }
+    spec.args = $('#runArgs').value;
+    spec.node = $('#runNode').value.trim();
+  } else if (mode === 'python') {
     const target = $('#runTarget').value.trim();
     if (!target) { toast('実行するファイルを入力してください', true); return; }
     const m = /^-m\s+(\S+)$/.exec(target);
@@ -109,7 +122,7 @@ async function startRun() {
     const r = await api('/api/run/start', { body: spec });
     appendConsole(`$ ${r.cmd}\n`, true);
   } catch (e) { toast(e.message, true, 6000); return; }
-  R.running = true; R.traced = mode === 'python';
+  R.running = true; R.traced = mode === 'python' || mode === 'node';
   setRunButtons();
   clearInterval(R.timer);
   R.timer = setInterval(pollRun, 300);
@@ -200,7 +213,7 @@ function symForFrame(rel, first, name, lineno) {
     const syms = (f.sym || []).map((id) => [id, S.sym[id]]).filter(([, s]) => s);
     if (name === '<module>') {
       const guard = syms.find(([, s]) => s.q === '__main__' && lineno && s.s <= lineno && lineno <= s.e);
-      const mod = guard || syms.find(([, s]) => s.q === '<module>') || syms.find(([, s]) => s.q === '__main__');
+      const mod = guard || syms.find(([, s]) => s.q === '<module>') || syms.find(([, s]) => s.k === 'toplevel');
       res = mod ? mod[0] : null;
     } else {
       let best = null;
@@ -304,10 +317,10 @@ function fmtMs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(2) + 's' : Math.rou
 
 function renderHot() {
   if (!R.snap) return;
-  if (!R.traced) { $('#hotTable').innerHTML = '<tr><td class="muted">コマンド実行では関数ごとの状況は表示されません（Python のみ対応）</td></tr>'; return; }
+  if (!R.traced) { $('#hotTable').innerHTML = '<tr><td class="muted">コマンド実行では関数ごとの状況は表示されません（Python / Node.js モードで表示されます）</td></tr>'; return; }
   const rows = [...R.ran.entries()].sort((a, b) => b[1].incl - a[1].incl || b[1].calls - a[1].calls).slice(0, 60);
   const max = Math.max(1, ...rows.map(([, r]) => r.incl));
-  const note = counted() ? '' : `<tr><td colspan="4" class="muted">軽量モード (Python ${esc(R.snap.py || '')}): 回数は数えず、10ms ごとのサンプリングで時間と実行位置を測っています。⚙ で回数も数えられます (遅くなります)</td></tr>`;
+  const note = R.snap.how === 'node-inspector' ? '<tr><td colspan="4" class="muted">Node.js: 「いま実行中」は直前 0.3 秒で最後に実行していた位置です。同期処理で止まっている間は更新されません。async 関数の回数は await からの再開も数えます</td></tr>' : counted() ? '' : `<tr><td colspan="4" class="muted">軽量モード (Python ${esc(R.snap.py || '')}): 回数は数えず、10ms ごとのサンプリングで時間と実行位置を測っています。⚙ で回数も数えられます (遅くなります)</td></tr>`;
   $('#hotTable').innerHTML = note + '<tr><th>関数</th><th>回数</th><th>累計</th><th class="self">自身</th></tr>' + rows.map(([sid, r]) => {
     const s = S.sym[sid];
     return `<tr data-sym="${esc(sid)}" class="${R.stackIds.includes(sid) ? 'live' : ''}" title="${esc(s.f)}:${s.s}">`

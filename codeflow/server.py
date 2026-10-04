@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import shutil
 import string
 import sys
 import traceback
@@ -188,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
             if not PROJECT.root:
                 return _json(self, {"python": sys.executable})
             py = find_python(PROJECT.root)
-            return _json(self, {"python": py, "venv": py != sys.executable})
+            return _json(self, {"python": py, "venv": py != sys.executable, "node": shutil.which("node") or ""})
         if path == "/api/flow":
             return _json(self, PROJECT.flow(q["path"], int(q["line"])))
         if path == "/api/stamp":

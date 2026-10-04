@@ -10,6 +10,8 @@ import locale
 import os
 import secrets
 import shlex
+import shutil
+import tempfile
 import signal
 import socket
 import subprocess
@@ -18,6 +20,7 @@ import threading
 import time
 
 TRACER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracer.py")
+TRACER_NODE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracer_node.js")
 MAX_CHUNKS = 4000
 IS_WIN = sys.platform == "win32"
 
@@ -44,7 +47,9 @@ class Run:
         self.ended: float | None = None
         self.token = secrets.token_hex(16)
         self.lock = threading.Lock()
-        self.traced = spec.get("mode") == "python"
+        self.traced = spec.get("mode") in ("python", "node")
+        self.snapfile: str | None = None
+        self.snap_mtime = 0
         self.listener: socket.socket | None = None
         self.proc: subprocess.Popen | None = None
 
@@ -58,7 +63,24 @@ class Run:
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         shell = False
-        if self.traced:
+        if spec.get("mode") == "node":
+            node = spec.get("node") or shutil.which("node")
+            if not node:
+                raise ValueError("Node.js が見つかりません (⚙ で node の場所を指定してください)")
+            target = os.path.realpath(os.path.join(self.root, spec.get("target") or ""))
+            if not os.path.isfile(target):
+                raise ValueError(f"ファイルが見つかりません: {spec.get('target')}")
+            args = shlex.split(spec.get("args") or "", posix=not IS_WIN)
+            cmd = [node, "--require", TRACER_NODE, target, *args]
+            fd, self.snapfile = tempfile.mkstemp(prefix="codeflow-", suffix=".json")
+            os.close(fd)
+            os.remove(self.snapfile)
+            env["CODEFLOW_ROOT"] = self.root
+            env["CODEFLOW_SNAPFILE"] = self.snapfile
+            env["CODEFLOW_COUNT"] = "1"
+            env.setdefault("FORCE_COLOR", "0")
+            enc = "utf-8"
+        elif self.traced:
             py = spec.get("python") or find_python(self.root)
             args = shlex.split(spec.get("args") or "", posix=not IS_WIN)
             if spec.get("module"):
@@ -140,11 +162,18 @@ class Run:
                 pass
         # トレーサの最終報告 (done) が届くのを少しだけ待つ
         for _ in range(20):
+            self._read_snapfile()
             with self.lock:
                 if not self.traced or (self.snapshot or {}).get("done"):
                     break
             time.sleep(0.05)
         self.ended = time.time()
+        if self.snapfile:
+            self._read_snapfile()
+            try:
+                os.remove(self.snapfile)
+            except OSError:
+                pass
 
     def _append(self, text):
         if not text:
@@ -157,7 +186,24 @@ class Run:
                 self.base += drop
 
     # ---- 操作 ----
+    def _read_snapfile(self):
+        """Node のトレーサが書き出すファイルを読む (更新されたときだけ)。"""
+        if not self.snapfile:
+            return
+        try:
+            m = os.stat(self.snapfile).st_mtime_ns
+            if m == self.snap_mtime:
+                return
+            with open(self.snapfile, encoding="utf-8") as f:
+                snap = json.load(f)
+            self.snap_mtime = m
+            with self.lock:
+                self.snapshot = snap
+        except (OSError, ValueError):
+            pass
+
     def status(self, since: int) -> dict:
+        self._read_snapfile()
         with self.lock:
             start = max(0, since - self.base)
             text = "".join(self.chunks[start:])
