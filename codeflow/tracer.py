@@ -82,9 +82,21 @@ def install_counter():
             mon.set_events(tid, mon.events.PY_START)
             return "sys.monitoring"
 
+    # 3.11 以前: setprofile はジェネレータの再開でも呼ばれるので、コードオブジェクト単位でキャッシュして最小限の処理にする
+    keys = {}
+
     def prof(frame, event, _arg):
-        if event == "call":
-            _count(frame.f_code)
+        if event != "call":
+            return
+        code = frame.f_code
+        k = keys.get(code)
+        if k is None:
+            rel = rel_of(code.co_filename)
+            k = keys[code] = (rel, code.co_firstlineno, code.co_name) if rel else False
+        if k:
+            if frame.f_lasti > 0 and code.co_flags & 0x2A0:   # 再開したジェネレータ/コルーチンは数えない
+                return
+            calls[k] = calls.get(k, 0) + 1
 
     sys.setprofile(prof)
     threading.setprofile(prof)
@@ -111,6 +123,7 @@ class Reporter(threading.Thread):
         self.t0 = time.perf_counter()
         self.stop_ev = threading.Event()
         self.exc = None
+        self.how = ""
         port = os.environ.get("CODEFLOW_PORT")
         if port:
             try:
@@ -133,7 +146,7 @@ class Reporter(threading.Thread):
         fn = [[k[0], k[1], k[2], calls.get(k, 0), round(incl.get(k, 0.0) * 1000, 1), round(selft.get(k, 0.0) * 1000, 1)]
               for k in keys]
         msg = {"t": round(time.perf_counter() - self.t0, 3), "stack": main, "threads": others[:8], "fn": fn,
-               "done": done}
+               "done": done, "how": self.how, "py": "%d.%d" % sys.version_info[:2]}
         if self.exc:
             msg["exc"] = self.exc
         return msg
@@ -187,7 +200,14 @@ def main():
     mode, target, args = sys.argv[1], sys.argv[2], sys.argv[3:]
     rep = Reporter(threading.get_ident())
     rep.start()
-    how = install_counter()
+    # 呼び出し回数を数えるか: auto(既定)=sys.monitoring が使える 3.12 以降だけ数える / 1=常に数える / 0=数えない
+    # (3.11 以前の setprofile はジェネレータの再開ごとにも呼ばれ、処理によっては数倍遅くなるため既定では使わない)
+    mode_count = os.environ.get("CODEFLOW_COUNT", "auto")
+    if mode_count == "1" or (mode_count == "auto" and hasattr(sys, "monitoring")):
+        how = install_counter()
+    else:
+        how = "sampling"
+    rep.how = how
     if os.environ.get("CODEFLOW_VERBOSE"):
         print(f"[codeflow] tracing with {how}", file=sys.stderr)
     code = 0

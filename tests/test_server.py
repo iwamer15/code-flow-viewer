@@ -90,7 +90,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(st, 403)
 
     def test_run_traced(self):
-        st, r = self.req("/api/run/start", {"mode": "python", "target": "main.py", "args": "--epochs 2"})
+        st, r = self.req("/api/run/start", {"mode": "python", "target": "main.py", "args": "--epochs 2", "count": True})
         self.assertEqual(st, 200, r)
         snap = None
         for _ in range(100):

@@ -74,6 +74,7 @@ class Run:
             env["CODEFLOW_ROOT"] = self.root
             env["CODEFLOW_PORT"] = str(self.listener.getsockname()[1])
             env["CODEFLOW_TOKEN"] = self.token
+            env["CODEFLOW_COUNT"] = "1" if spec.get("count") else "auto"
             threading.Thread(target=self._accept, daemon=True).start()
             enc = "utf-8"
         else:

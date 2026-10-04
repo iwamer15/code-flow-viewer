@@ -21,7 +21,7 @@ function saveRunPrefs() {
   try {
     localStorage.setItem(runKey(), JSON.stringify({
       mode: $('#runMode').value, target: $('#runTarget').value, args: $('#runArgs').value, cmd: $('#runCmd').value,
-      python: $('#runPython').value, cwd: $('#runCwd').value,
+      python: $('#runPython').value, cwd: $('#runCwd').value, count: $('#runCount').checked,
     }));
   } catch (e) { /* 無視 */ }
 }
@@ -43,6 +43,7 @@ async function prepareRun() {
     $('#runArgs').value = prefs.args || '';
     $('#runCmd').value = prefs.cmd || '';
     $('#runCwd').value = prefs.cwd || '';
+    $('#runCount').checked = !!prefs.count;
   }
   try {
     const cfg = await api('/api/run/config');
@@ -98,6 +99,7 @@ async function startRun() {
     if (m) spec.module = m[1]; else spec.target = target;
     spec.args = $('#runArgs').value;
     spec.python = $('#runPython').value.trim();
+    spec.count = $('#runCount').checked;
   } else {
     spec.command = $('#runCmd').value;
   }
@@ -243,11 +245,11 @@ function applyRunState() {
         const sid = n.data('sid');
         if (sid) {
           if (ran.has(sid)) n.addClass('ran');
-          else if (R.done && R.traced && n.data('kind') !== 'class') n.addClass('notrun');
+          else if (R.done && R.traced && counted() && n.data('kind') !== 'class') n.addClass('notrun');
         } else if (n.data('file') && S.view === 'modules') {
           const f = S.files.get(n.data('file'));
           if ((f?.sym || []).some((id) => ran.has(id))) n.addClass('ran');
-          else if (R.done && R.traced && f?.lang === 'python') n.addClass('notrun');
+          else if (R.done && R.traced && counted() && f?.lang === 'python') n.addClass('notrun');
           if (R.stackIds.some((id) => S.sym[id]?.f === f?.p)) n.addClass('active');
         }
       });
@@ -278,18 +280,21 @@ function applyRunState() {
   }
 }
 
+// 呼び出し回数を数えたか (サンプリングだけだと短い関数を見逃すので「未実行」は断定しない)
+function counted() { return R.snap && R.snap.how && R.snap.how !== 'sampling'; }
+
 function runMark(sid) {
   if (!R.snap || !R.traced) return '';
   if (sid === R.errSid) return '<span class="rm" style="color:var(--bad)">✖ </span>';
   if (R.stackIds.includes(sid)) return '<span class="rm" style="color:#f59e0b">▶ </span>';
   if (R.ran.has(sid)) return '<span class="rm" style="color:var(--ok)">✔ </span>';
-  if (R.done) return '<span class="rm muted">· </span>';
+  if (R.done && counted()) return '<span class="rm muted">· </span>';
   return '';
 }
 function runInfo(sid) {
   if (!R.snap || !R.traced) return '';
   const r = R.ran.get(sid);
-  if (!r) return `<div class="runinfo sec">${R.done ? '今回の実行では呼ばれませんでした' : 'まだ呼ばれていません'}</div>`;
+  if (!r) return `<div class="runinfo sec">${!counted() ? '実行は観測されていません（軽量モードでは短い関数を見逃すことがあります）' : R.done ? '今回の実行では呼ばれませんでした' : 'まだ呼ばれていません'}</div>`;
   return `<div class="runinfo sec" style="color:var(--text)">実行: ${r.calls ? r.calls + '回' : '実行済み'} · 累計 ${fmtMs(r.incl)} · 自身 ${fmtMs(r.self)}${R.stackIds.includes(sid) ? ' · <b style="color:#f59e0b">実行中</b>' : ''}</div>`;
 }
 function fmtMs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(2) + 's' : Math.round(ms) + 'ms'; }
@@ -299,7 +304,8 @@ function renderHot() {
   if (!R.traced) { $('#hotTable').innerHTML = '<tr><td class="muted">コマンド実行では関数ごとの状況は表示されません（Python のみ対応）</td></tr>'; return; }
   const rows = [...R.ran.entries()].sort((a, b) => b[1].incl - a[1].incl || b[1].calls - a[1].calls).slice(0, 60);
   const max = Math.max(1, ...rows.map(([, r]) => r.incl));
-  $('#hotTable').innerHTML = '<tr><th>関数</th><th>回数</th><th>累計</th><th>自身</th></tr>' + rows.map(([sid, r]) => {
+  const note = counted() ? '' : `<tr><td colspan="4" class="muted">軽量モード (Python ${esc(R.snap.py || '')}): 回数は数えず、10ms ごとのサンプリングで時間と実行位置を測っています。⚙ で回数も数えられます (遅くなります)</td></tr>`;
+  $('#hotTable').innerHTML = note + '<tr><th>関数</th><th>回数</th><th>累計</th><th>自身</th></tr>' + rows.map(([sid, r]) => {
     const s = S.sym[sid];
     return `<tr data-sym="${esc(sid)}" class="${R.stackIds.includes(sid) ? 'live' : ''}" title="${esc(s.f)}:${s.s}">`
       + `<td>${esc(symLabel(s))} <span class="muted">${esc(base(s.f))}</span></td><td>${r.calls || '-'}</td>`
